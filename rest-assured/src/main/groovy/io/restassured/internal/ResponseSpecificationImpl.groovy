@@ -257,19 +257,40 @@ class ResponseSpecificationImpl implements FilterableResponseSpecification {
     notNull(key, "key")
     notNull(matcher, "matcher")
 
-    def originalMergedPath = mergeKeyWithRootPath(key)
-    def mergedPath = applyArguments(originalMergedPath, arguments)
     validateResponseIfRequired {
-      bodyMatchers << new BodyMatcher(key: mergedPath, matcher: matcher, rpr: rpr)
+      bodyMatchers << new BodyMatcher(key: applyArguments(mergeKeyWithRootPath(key), arguments), matcher: matcher, rpr: rpr)
       if (additionalKeyMatcherPairs?.length > 0) {
         def pairs = MapCreator.createMapFromObjects(CollisionStrategy.MERGE, additionalKeyMatcherPairs)
-        pairs.each { matchingKey, hamcrestMatcher ->
-          // If matching key is instance of list (we assume it's a list of arguments) then we should simply return the merged path,
-          // otherwise merge the current path with the supplied key
-          def keyWithRoot = matchingKey instanceof List ? applyArguments(originalMergedPath, matchingKey) : mergeKeyWithRootPath(matchingKey)
+        pairs.each { matchingKey, matchingValue ->
+          String keyWithRoot
+          def hamcrestMatcher
+          if (matchingKey instanceof List) {
+            // If matching key is instance of list (we assume it's a list of arguments) then we should simply return the merged path,
+            // otherwise merge the current path with the supplied key
+            keyWithRoot = applyArguments(mergeKeyWithRootPath(""), matchingKey)
+            hamcrestMatcher = matchingValue
+          } else if (matchingValue instanceof MapCreator.ArgsAndValue) {
+            String mergedPath = mergeKeyWithRootPath(matchingKey)
+            keyWithRoot = applyArguments(mergedPath, matchingValue.args)
+            hamcrestMatcher = matchingValue.value
+          } else {
+            keyWithRoot = mergeKeyWithRootPath(matchingKey)
+            hamcrestMatcher = matchingValue
+          }
+
           if (hamcrestMatcher instanceof List) {
             hamcrestMatcher.each { m ->
-              bodyMatchers << new BodyMatcher(key: keyWithRoot, matcher: m, rpr: rpr)
+              def keyToUse
+              def matcherToUse
+              if (m instanceof MapCreator.ArgsAndValue) {
+                keyToUse = applyArguments(keyWithRoot, m.args)
+                matcherToUse = m.value
+              } else {
+                // Plain hamcrest matcher, what happens is that if a user has specified body("x", greaterThan(2), "x", lessThan(10)) then "x" will have a list of these hamcrest matchers
+                keyToUse = keyWithRoot
+                matcherToUse = m
+              }
+              bodyMatchers << new BodyMatcher(key: keyToUse, matcher: matcherToUse, rpr: rpr)
             }
           } else {
             bodyMatchers << new BodyMatcher(key: keyWithRoot, matcher: hamcrestMatcher, rpr: rpr)
@@ -338,30 +359,22 @@ class ResponseSpecificationImpl implements FilterableResponseSpecification {
     return this.rootPath(rootPath, [])
   }
 
-  ResponseSpecification root(String rootPath) {
-    return this.rootPath(rootPath);
-  }
-
-  ResponseSpecification noRoot() {
-    return noRootPath()
-  }
-
   ResponseSpecification noRootPath() {
     return rootPath("")
   }
 
-  ResponseSpecification appendRoot(String pathToAppend) {
-    return appendRoot(pathToAppend, [])
+  ResponseSpecification appendRootPath(String pathToAppend) {
+    return appendRootPath(pathToAppend, [])
   }
 
-  ResponseSpecification appendRoot(String pathToAppend, List<Argument> arguments) {
+  ResponseSpecification appendRootPath(String pathToAppend, List<Argument> arguments) {
     notNull pathToAppend, "Path to append to root path"
     notNull arguments, "Arguments for path to append"
     def mergedPath = mergeKeyWithRootPath(pathToAppend)
     rootPath(mergedPath, arguments)
   }
 
-  ResponseSpecification detachRoot(String pathToDetach) {
+  ResponseSpecification detachRootPath(String pathToDetach) {
     notNull pathToDetach, "Path to detach from root path"
     throwIllegalStateExceptionIfRootPathIsNotDefined("detach path")
     pathToDetach = StringUtils.trim(pathToDetach);
